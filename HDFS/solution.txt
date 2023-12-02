@@ -1,0 +1,49 @@
+1 ---
+
+blockId=`hdfs fsck $1 -files -blocks | grep -m1 'blk' | sed 's|.*\(blk_[0-9]*\)_.*|\1|'`
+hdfs fsck -blockId $blockId | grep -m1 'Block replica' | sed 's|Block replica on datanode/rack: \(.*\)/.*|\1|'
+
+2 ---
+
+hdfs dfs -text $1 | head --bytes=10
+
+#Another solution:
+#filename=`echo $1 | sed 's|.*/\(.*\)|\1|'`
+#hdfs dfs -copyToLocal $1
+#head --bytes=10 $filename
+#rm $filename
+
+3 ---
+
+hdfs fsck $1 -blocks | grep 'Total blocks' | sed 's/.*Total blocks (validated):[[:space:]]*\([0-9]*\)[[:space:]]*.*/\1/'
+
+#Another solution:
+#hdfs fsck $1 -files -blocks | grep -c 'blk'
+
+4 ---
+
+serverName=`hdfs fsck -blockId $1 | grep -m1 'Block replica' | sed 's|Block replica on datanode/rack: \(.*\)/.*|\1|'`
+localPath=`sudo -u hdfsuser ssh hdfsuser@$serverName "locate $1 && exit" | head -n1`
+echo $serverName:$localPath
+
+5 ---
+
+dd if=/dev/zero of=myfile bs=$1 count=1
+hdfs dfs -D dfs.replication=1 -put myfile
+
+identifiers=`hdfs fsck /user/pd2023a007/myfile -files -blocks | grep 'blk' | sed 's|.*\(blk_[0-9]*\)_.*|\1|'`
+
+totalSize=0
+
+for blockId in $identifiers
+do
+	datanode=`hdfs fsck -blockId $blockId | grep 'Block replica' | sed 's|Block replica on datanode/rack: \(.*\)/.*|\1|'`
+	path=$(sudo -u hdfsuser ssh hdfsuser@$datanode find /dfs -name $blockId)
+	size=$(sudo -u hdfsuser ssh hdfsuser@$datanode stat -c %s $path)
+	totalSize=$(( $totalSize + $size ))
+done
+
+echo $(( $totalSize - $1))
+
+hdfs dfs -rm myfile
+rm myfile
